@@ -253,6 +253,15 @@ tr.sub td{background:var(--page2);font-weight:700;}
       </div>
     </div>
 
+    <div class="sec">
+      <div class="sub-h">Additional products (manual)</div>
+      <div class="fill1">
+        <div class="helper" style="margin-bottom:8px">For workload the files don't cover. Add a product, pick the team, and enter target doctors and visits per doctor per year. These visits are <strong>added on top</strong> of the file-based need.</div>
+        <div id="manual-list"></div>
+        <button class="add-btn" onclick="addManual()">+ Add product</button>
+      </div>
+    </div>
+
     <div class="grp grp2">Step 2 · Afford — Profitability &amp; FTE</div>
 
     <div class="sec">
@@ -318,6 +327,7 @@ const fmt=(n,d=1)=>(isFinite(n)?n:0).toLocaleString('en-HK',{minimumFractionDigi
 const sgn=n=>(n>0?'+':'')+n;
 const STAGE={launch:'Launch',growth:'Growth',maturation:'Maturation',offpatent:'Off-Patent'};
 let teams=[], lines=[], tid=0, lid=0, step=1;
+let manualItems=[], mid=0;
 let accData=null, mapData=null, segSel={};
 
 function addTeam(d){d=d||{};teams.push({id:++tid,name:d.name||('Team '+(teams.length+1)),fte:d.fte!=null?d.fte:10,cpf:d.cpf!=null?d.cpf:0.85});renderTeams();renderLines();run();}
@@ -332,6 +342,7 @@ function renderTeams(){
     <div class="card-top"><input class="card-name" value="${(t.name||'').replace(/"/g,'&quot;')}" oninput="setT(${t.id},'name',this.value)"><button class="card-x" onclick="removeTeam(${t.id})">✕</button></div>
     <div class="row2"><div><label class="mini">Current FTEs</label><input class="inp num" type="number" value="${t.fte}" oninput="setT(${t.id},'fte',this.value)"></div>
     <div><label class="mini">Cost/FTE (HKD M)</label><input class="inp num" type="number" step="0.01" value="${t.cpf}" oninput="setT(${t.id},'cpf',this.value)"></div></div></div>`).join('');
+  if(typeof renderManual==='function')renderManual();
 }
 function renderLines(){
   const opts=l=>teams.map(t=>`<option value="${t.id}" ${l.teamId===t.id?'selected':''}>${(t.name||'').replace(/</g,'')}</option>`).join('');
@@ -344,6 +355,27 @@ function renderLines(){
     <div class="dual" style="margin-bottom:8px"><input id="chgr-${l.id}" type="range" min="-100" max="80" value="${l.chg}" oninput="setLine(${l.id},'chg',this.value);document.getElementById('chgn-${l.id}').value=this.value"><input id="chgn-${l.id}" type="number" value="${l.chg}" oninput="setLine(${l.id},'chg',this.value);document.getElementById('chgr-${l.id}').value=this.value"></div>
     <label class="mini">Target profitability % (CCM III)</label>
     <div class="dual"><input id="tgtr-${l.id}" type="range" min="0" max="90" value="${l.target}" oninput="setLine(${l.id},'target',this.value);document.getElementById('tgtn-${l.id}').value=this.value"><input id="tgtn-${l.id}" type="number" value="${l.target}" oninput="setLine(${l.id},'target',this.value);document.getElementById('tgtr-${l.id}').value=this.value"></div></div>`).join('');
+}
+
+/* Manual products — extra workload a team carries that is NOT in the uploaded files */
+function teamNames(){const s=new Set();if(mapData)mapData.forEach(d=>{if(d.team)s.add(d.team);});teams.forEach(t=>{if(t.name)s.add(t.name);});return [...s].sort();}
+function addManual(d){d=d||{};const tn=d.team||teamNames()[0]||(teams[0]&&teams[0].name)||'Team 1';
+  manualItems.push({id:++mid,product:d.product||('Other product '+(manualItems.length+1)),team:tn,segment:d.segment||'',docs:d.docs!=null?d.docs:20,freq:d.freq!=null?d.freq:6});
+  renderManual();run();}
+function setManual(id,k,v){const m=manualItems.find(x=>x.id===id);if(!m)return;m[k]=(k==='docs'||k==='freq')?(+v||0):v;run();}
+function removeManual(id){manualItems=manualItems.filter(x=>x.id!==id);renderManual();run();}
+function renderManual(){
+  const box=$('manual-list');if(!box)return;
+  const tn=teamNames();
+  if(!manualItems.length){box.innerHTML='<div class="helper">Nothing added — the Need above reflects only the uploaded files. Add a product to include other workload this team carries (e.g. a brand not in the files).</div>';return;}
+  const topt=m=>{let o=tn.map(n=>`<option ${m.team===n?'selected':''}>${n.replace(/</g,'')}</option>`).join('');if(!tn.includes(m.team)&&m.team)o+=`<option selected>${m.team.replace(/</g,'')}</option>`;return o;};
+  box.innerHTML=manualItems.map(m=>`<div class="card">
+    <div class="card-top"><input class="card-name" value="${(m.product||'').replace(/"/g,'&quot;')}" oninput="setManual(${m.id},'product',this.value)"><button class="card-x" onclick="removeManual(${m.id})">✕</button></div>
+    <div class="row2" style="margin-bottom:8px"><div><label class="mini">Team</label><select class="sel" onchange="setManual(${m.id},'team',this.value)">${topt(m)}</select></div>
+    <div><label class="mini">Segment (optional)</label><input class="inp" value="${(m.segment||'').replace(/"/g,'&quot;')}" oninput="setManual(${m.id},'segment',this.value)"></div></div>
+    <div class="row2"><div><label class="mini">Target doctors</label><input class="inp num" type="number" value="${m.docs}" oninput="setManual(${m.id},'docs',this.value)"></div>
+    <div><label class="mini">Visits / doctor / yr</label><input class="inp num" type="number" value="${m.freq}" oninput="setManual(${m.id},'freq',this.value)"></div></div>
+    <div class="helper" style="margin-top:6px">Target doctors × visits/doctor = visits/yr added to <strong>${(m.team||'').replace(/</g,'')}</strong></div></div>`).join('');
 }
 
 /* afford: per-product slices summed within a team; scaleFn lets us run scenarios */
@@ -488,8 +520,19 @@ function needData(){
   }
   const segDocN={};Object.keys(segDocs).forEach(s=>segDocN[s]=segDocs[s].size);
   const teamDocN={};Object.keys(teamDocs).forEach(t=>teamDocN[t]=teamDocs[t].size);
+  const fileV=totV, fileDocs=allDocs.size;
+  // Manual products: extra workload not in the files. Added on top (separate visit streams).
+  let manualV=0, manualDocs=0, nManual=0;
+  manualItems.forEach(m=>{
+    if(m.segment&&segSel[m.segment]===false)return;
+    const docs=+m.docs||0, v=docs*(+m.freq||0);
+    if(docs<=0&&v<=0)return;
+    byTeam[m.team]=(byTeam[m.team]||0)+v; totV+=v; manualV+=v; nManual++;
+    teamDocN[m.team]=(teamDocN[m.team]||0)+docs; manualDocs+=docs;
+    if(m.segment){bySeg[m.segment]=(bySeg[m.segment]||0)+v; segDocN[m.segment]=(segDocN[m.segment]||0)+docs;}
+  });
   const nSelProd=Object.keys(filtSel.product||{}).filter(k=>filtSel.product[k]!==false).length;
-  return {byTeam,bySeg,segDocN,teamDocN,docTotal:allDocs.size,totV,rawV:rawTotV,nSelProd,sumMode,accKept:cut?cut.size:0,accTot:ac.accTot};
+  return {byTeam,bySeg,segDocN,teamDocN,docTotal:fileDocs+manualDocs,totV,fileV,rawV:rawTotV,nSelProd,sumMode,manualV,manualDocs,nManual,accKept:cut?cut.size:0,accTot:ac.accTot};
 }
 function capacity(){return (+$('c-cd').value)*(+$('c-wd').value);}
 function repsNeeded(v){const cap=capacity(),cyc=+$('c-cy').value||1,u=(+$('c-ut').value)/100;return cap>0&&u>0?(v*cyc)/(cap*u):0;}
@@ -522,20 +565,31 @@ function scopeRevenue(){
   return s;
 }
 function coverageScope(){
+  const esc=x=>(''+(x==null?'':x)).replace(/</g,'&lt;').replace(/"/g,'&quot;');
   const segOn=Object.keys(segSel).filter(s=>segSel[s]);
   const acct=acctMode==='layers'?('sales layers '+Object.keys(layerSel).filter(i=>layerSel[i]!==false).map(i=>(i*10)+'–'+((+i+1)*10)+'%').join(', ')):('top '+$('i-top').value+'% of accounts by sales');
   const rev=scopeRevenue();
   const revBox=accData?`<div class="note-line" style="font-size:16px;background:var(--sky-bg);border:1px solid var(--sky-bdr);margin-bottom:12px">Revenue in this scope (File 1): <strong>HKD ${fmt(rev,0)}</strong> <span style="color:var(--ink3);font-weight:400">— total Total Sales for the selected year, product(s) and sector(s)</span></div>`:'';
+  const mlist=manualItems.filter(m=>(+m.docs||0)>0);
+  const mTotV=mlist.reduce((s,m)=>s+(+m.docs||0)*(+m.freq||0),0), mTotD=mlist.reduce((s,m)=>s+(+m.docs||0),0);
+  const manualBox=mlist.length?`
+    <div class="sub-h" style="margin:14px 0 6px;color:#8a6d1a">Manually added products — not in the files</div>
+    <table>
+      <tr style="color:var(--ink3);font-size:12px"><td>Product</td><td class="r">Team</td><td class="r">Segment</td><td class="r">Doctors</td><td class="r">Visits/dr/yr</td><td class="r">Visits/yr</td></tr>
+      ${mlist.map(m=>`<tr><td><strong>${esc(m.product)}</strong></td><td class="r">${esc(m.team)}</td><td class="r">${m.segment?esc(m.segment):'all'}</td><td class="r">${fmt(+m.docs||0,0)}</td><td class="r">${fmt(+m.freq||0,0)}</td><td class="r"><strong>${fmt((+m.docs||0)*(+m.freq||0),0)}</strong></td></tr>`).join('')}
+      <tr class="total-row"><td><strong>Total added</strong></td><td></td><td></td><td class="r"><strong>${fmt(mTotD,0)}</strong></td><td></td><td class="r"><strong>${fmt(mTotV,0)}</strong></td></tr>
+    </table>
+    <div class="helper">Added on top of the file-based need as separate visit streams. Manual doctors are counted as entered and may overlap doctors already in the files.</div>`:'';
   return `<div class="panel"><div class="panel-title">Coverage scope reviewed</div>${revBox}
     <table>
       <tr><td>Year</td><td class="r"><strong>${selYear||'All'}</strong></td></tr>
-      <tr><td>Product(s)</td><td class="r"><strong>${ticked('product')}</strong></td></tr>
+      <tr><td>Product(s) from files</td><td class="r"><strong>${ticked('product')}</strong>${mlist.length?` <span style="color:#8a6d1a;font-weight:400">· + ${mlist.length} manual (below)</span>`:''}</td></tr>
       <tr><td>Sector(s) / hospital type</td><td class="r"><strong>${ticked('sector')}</strong></td></tr>
       <tr><td>Revenue in scope (File 1)</td><td class="r"><strong>HKD ${fmt(rev,0)}</strong></td></tr>
       <tr><td>HCP segments covered</td><td class="r"><strong>${segOn.join(', ')||'none'}</strong></td></tr>
       <tr><td>Accounts covered</td><td class="r"><strong>${acct}</strong></td></tr>
       <tr><td>Capacity assumption</td><td class="r"><strong>${$('c-cd').value} calls/day × ${$('c-wd').value} days in field${(+$('c-cy').value||1)!==1?(' × '+$('c-cy').value+' cycles'):''} @ ${$('c-ut').value}% util</strong></td></tr>
-    </table></div>`;
+    </table>${manualBox}</div>`;
 }
 function pyramidHtml(){
   if(!accData)return '';
@@ -645,15 +699,18 @@ function renderStep2(){
   const required=nd.totV*cyc, usable=cap*util;
   const fsum=k=>{const vals=uniqVals(k);if(!vals.length)return null;const sel=vals.filter(v=>filtSel[k][v]!==false);if(sel.length===vals.length||sel.length===0)return null;return k[0].toUpperCase()+k.slice(1)+': '+(sel.length<=3?sel.join(', '):sel.length+' selected');};
   const filtTxt=[selYear?('Year: '+selYear):null,fsum('product'),fsum('sector')].filter(Boolean).join(' · ')||'All years / products / sectors';
-  const dedupNote=(nd.nSelProd>1&&nd.rawV>nd.totV)
-    ? `<div class="note-line" style="background:#fdf8e8;border:1px solid #e8d9a8"><strong>Shared visits removed.</strong> You selected <strong>${nd.nSelProd} products</strong>. One rep visit can detail several products, so the raw sum of "Call Vist No" across products (<strong>${fmt(nd.rawV,0)}</strong>) counts the same physical visits more than once. The tool keeps the <strong>highest</strong> visit number across the selected products for each doctor at each account within a team, giving <strong>${fmt(nd.totV,0)}</strong> physical visits — a <strong>${fmt((1-nd.totV/nd.rawV)*100,0)}%</strong> reduction. Visits still add up across different accounts and across teams (HA1…P3 vs SC are separate reps).</div>`
+  const dedupNote=(nd.nSelProd>1&&!nd.sumMode&&nd.rawV>nd.fileV)
+    ? `<div class="note-line" style="background:#fdf8e8;border:1px solid #e8d9a8"><strong>Shared visits removed.</strong> You selected <strong>${nd.nSelProd} products</strong>. One rep visit can detail several products, so the raw sum of "Call Vist No" across products (<strong>${fmt(nd.rawV,0)}</strong>) counts the same physical visits more than once. The tool keeps the <strong>highest</strong> visit number across the selected products for each doctor at each account within a team, giving <strong>${fmt(nd.fileV,0)}</strong> file visits — a <strong>${fmt((1-nd.fileV/nd.rawV)*100,0)}%</strong> reduction. Visits still add up across different accounts and across teams (HA1…P3 vs SC are separate reps).</div>`
+    : '';
+  const manualNote=(nd.nManual>0)
+    ? `<div class="note-line" style="background:#fdf8e8;border:1px solid #e8d9a8"><strong>Holistic view — manual products included.</strong> ${nd.nManual} manually-added product${nd.nManual>1?'s':''} add <strong>${fmt(nd.manualV,0)}</strong> visits/yr and <strong>${fmt(nd.manualDocs,0)}</strong> target doctors on top of the files (file visits ${fmt(nd.fileV,0)} + manual ${fmt(nd.manualV,0)} = ${fmt(nd.totV,0)}). These are treated as additional visit streams; manual doctors are added as entered and may overlap doctors already in the files.</div>`
     : '';
   const calcHtml=`<div class="panel"><div class="panel-title">The calculation — how "reps needed" is built</div>
     <div class="panel-sub">Worked through with your live numbers</div>
-    ${dedupNote}
+    ${dedupNote}${manualNote}
     <div class="note-line" style="font-size:15px;background:var(--sky-bg);border:1px solid var(--sky-bdr)"><strong>${fmt(required,0)}</strong> visits to cover ÷ <strong>${fmt(usable,0)}</strong> usable visits per rep/yr = <strong>${fmt(reps,1)} reps needed</strong>.</div>
     <table>
-      <tr><td>① Physical visits in scope = "Call Vist No" for the selected HCPs${(nd.nSelProd>1&&!nd.sumMode)?', shared visits across products removed':(nd.nSelProd>1&&nd.sumMode?', summed across products':'')}</td><td class="r">${fmt(nd.totV,0)}</td></tr>
+      <tr><td>① Physical visits in scope${nd.nManual>0?' = files + manual':' = "Call Vist No" for the selected HCPs'}${(nd.nSelProd>1&&!nd.sumMode)?', shared visits removed':(nd.nSelProd>1&&nd.sumMode?', summed across products':'')}</td><td class="r">${nd.nManual>0?(fmt(nd.fileV,0)+' + '+fmt(nd.manualV,0)+' = '):''}${fmt(nd.totV,0)}</td></tr>
       <tr><td>② Required visits per year = ① × cycles/yr</td><td class="r">${fmt(nd.totV,0)} × ${cyc} = <strong>${fmt(required,0)}</strong></td></tr>
       <tr><td>③ One rep's capacity = calls/day × days in field</td><td class="r">${$('c-cd').value} × ${$('c-wd').value} = ${fmt(cap,0)} visits/yr</td></tr>
       <tr><td>④ Usable per rep = ③ × utilisation%</td><td class="r">${fmt(cap,0)} × ${$('c-ut').value}% = ${fmt(usable,0)} visits/yr</td></tr>
@@ -818,7 +875,7 @@ function buildPrint(phi){
   <div class="ps-foot">Afford = reps the per-product CCM III target funds. Need = target visits to selected segments + top-% accounts ÷ rep capacity. Sizes affordability &amp; coverage, not productivity. Guidance generic. v8.0</div>`;
 }
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
-function saveJSON(){const out={tool:'Field Force Sizing Planner v8.0',savedAt:new Date().toISOString(),phi:+$('i-phi').value,top:+$('i-top').value,selYear:selYear,filtSel:filtSel,acctMode:acctMode,layerSel:layerSel,prodOverlap:prodOverlap,cap:{cd:+$('c-cd').value,wd:+$('c-wd').value,cy:+$('c-cy').value,ut:+$('c-ut').value},teams:teams.map(t=>({name:t.name,fte:t.fte,cpf:t.cpf})),lines:lines.map(l=>({product:l.product,teamName:(teams.find(t=>t.id===l.teamId)||{}).name,rev:l.rev,chg:l.chg,target:l.target,stage:l.stage})),segSel};
+function saveJSON(){const out={tool:'Field Force Sizing Planner v8.0',savedAt:new Date().toISOString(),phi:+$('i-phi').value,top:+$('i-top').value,selYear:selYear,filtSel:filtSel,acctMode:acctMode,layerSel:layerSel,prodOverlap:prodOverlap,manualItems:manualItems.map(m=>({product:m.product,team:m.team,segment:m.segment,docs:m.docs,freq:m.freq})),cap:{cd:+$('c-cd').value,wd:+$('c-wd').value,cy:+$('c-cy').value,ut:+$('c-ut').value},teams:teams.map(t=>({name:t.name,fte:t.fte,cpf:t.cpf})),lines:lines.map(l=>({product:l.product,teamName:(teams.find(t=>t.id===l.teamId)||{}).name,rev:l.rev,chg:l.chg,target:l.target,stage:l.stage})),segSel};
   const tnm=teams.slice(0,3).map(t=>t.name).join('-').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,40)||'team';
   const b=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='FieldForceSizing_'+tnm+'_'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('JSON saved');}
 function loadJSON(e){const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=ev=>{try{const d=JSON.parse(ev.target.result);
@@ -827,10 +884,12 @@ function loadJSON(e){const f=e.target.files[0];if(!f)return;const rd=new FileRea
   if(d.prodOverlap){prodOverlap=d.prodOverlap;document.querySelectorAll('input[name=poverlap]').forEach(r=>{r.checked=((r.getAttribute('onchange')||'').includes("'"+prodOverlap+"'"));});}
   teams=[];lines=[];tid=0;lid=0;(d.teams||[]).forEach(t=>teams.push({id:++tid,name:t.name,fte:t.fte,cpf:t.cpf}));
   (d.lines||[]).forEach(l=>{const tm=teams.find(t=>t.name===l.teamName)||teams[0];lines.push({id:++lid,teamId:tm?tm.id:null,product:l.product,rev:l.rev,chg:l.chg,target:l.target,stage:l.stage||'maturation'});});
-  if(d.segSel)segSel=d.segSel;renderTeams();renderLines();run();toast('Data loaded');}catch(err){toast('Invalid JSON');}e.target.value='';};rd.readAsText(f);}
+  if(d.segSel)segSel=d.segSel;
+  manualItems=[];mid=0;(d.manualItems||[]).forEach(m=>manualItems.push({id:++mid,product:m.product||'Other product',team:m.team||'',segment:m.segment||'',docs:+m.docs||0,freq:+m.freq||0}));
+  renderTeams();renderLines();renderManual();run();toast('Data loaded');}catch(err){toast('Invalid JSON');}e.target.value='';};rd.readAsText(f);}
 function savePDF(){window.print();}
 function loadDemo(){$('i-phi').value=50;$('i-top').value=80;$('c-cd').value=7;$('c-wd').value=200;$('c-cy').value=1;$('c-ut').value=80;
-  teams=[];lines=[];tid=0;lid=0;accData=null;mapData=null;segSel={};step=1;filtSel={product:{},sector:{}};acctMode='top';layerSel={};selYear='';accDiag=null;mapDiag=null;prodOverlap='max';
+  teams=[];lines=[];tid=0;lid=0;accData=null;mapData=null;segSel={};step=1;filtSel={product:{},sector:{}};acctMode='top';layerSel={};selYear='';accDiag=null;mapDiag=null;prodOverlap='max';manualItems=[];mid=0;
   document.querySelectorAll('input[name=poverlap]').forEach(r=>{r.checked=((r.getAttribute('onchange')||'').includes("'max'"));});
   $('st-acc').textContent='none';$('st-acc').className='upl-state upl-no';$('st-map').textContent='none';$('st-map').className='upl-state upl-no';
   teams.push({id:++tid,name:'Team 1',fte:10,cpf:0.85});
