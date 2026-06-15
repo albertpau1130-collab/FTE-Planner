@@ -242,6 +242,11 @@ tr.sub td{background:var(--page2);font-weight:700;}
         </div>
         <label class="lbl" style="margin-top:10px">Target utilisation % <span class="lbl-note">(expected attainment)</span></label>
         <div class="range-wrap"><input id="c-ut" class="range-inp" type="range" min="60" max="100" step="1" value="80" oninput="run()"><span class="range-val num" id="v-ut">80%</span></div>
+        <label class="lbl" style="margin-top:12px">When several products are selected <span class="lbl-note">(how visits combine)</span></label>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
+          <label class="seg-chk"><input type="radio" name="poverlap" checked onchange="setOverlap('max')"> Products <strong>share</strong> visits — one call details several (recommended)</label>
+          <label class="seg-chk"><input type="radio" name="poverlap" onchange="setOverlap('sum')"> Products on <strong>separate</strong> visits — add up</label>
+        </div>
         <details class="why"><summary>What these mean</summary>
           <div class="helper">Calls/day × Days in field = visits one rep can do per year. <strong>Cycles/yr</strong> only multiplies the target visits if your "Call Vist No" is <em>per cycle</em> — leave at 1 if it is already a yearly number.<br><br><strong>Utilisation</strong> = share of a rep's theoretical capacity actually delivered as target calls. If reps reliably hit ~100% of plan, set this near 100%. Lower values build in a buffer for admin, travel and leave.</div>
         </details>
@@ -374,6 +379,7 @@ function setAllSeg(v){[...new Set((mapData||[]).map(d=>d.segment).filter(Boolean
 let selYear='';
 let filtSel={product:{},sector:{}};
 let acctMode='top', layerSel={};
+let prodOverlap='max'; // 'max' = products share visits (one call, several products); 'sum' = separate visits
 function uniqVals(k){const arr=[];if(k==='product'){(mapData||[]).forEach(d=>d.product&&arr.push(d.product));(accData||[]).forEach(a=>a.product&&arr.push(a.product));}else if(k==='sector'){(accData||[]).forEach(a=>a.sector&&arr.push(a.sector));(mapData||[]).forEach(d=>d.sector&&arr.push(d.sector));}return [...new Set(arr)].sort();}
 function uniqYears(){const s=new Set();(accData||[]).forEach(a=>a.year&&s.add(a.year));(mapData||[]).forEach(d=>d.year&&s.add(d.year));return [...s].sort().reverse();}
 function setAllFilt(k,v){uniqVals(k).forEach(x=>filtSel[k][x]=v);run();}
@@ -445,11 +451,17 @@ function buildAcctUI(){
 }
 function setAllLayers(v){for(let i=0;i<10;i++)layerSel[i]=v;run();}
 function setAcctMode(m){acctMode=m;run();}
+function setOverlap(m){prodOverlap=m;run();}
 function needData(){
   if(!mapData)return null;
   const ac=accountCut();const cut=ac.set;
   const sectAct=sectorActive();
-  const byTeam={},bySeg={},segDocs={},teamDocs={},allDocs=new Set();let totV=0;let rown=0;
+  const sumMode=(prodOverlap==='sum');
+  // Visits: in "share" mode one rep visit details several products, so visits OVERLAP across
+  // products for the same (team, doctor, buying account) → keep the MAX. In "separate" mode
+  // each product is its own visit → SUM. Visits always add up across accounts and teams.
+  const best={}; let rown=0, rawTotV=0;
+  const byTeam={},bySeg={},segDocs={},teamDocs={},allDocs=new Set();let totV=0;
   mapData.forEach(d=>{
     rown++;
     if(selYear&&d.year&&d.year!==selYear)return;
@@ -457,15 +469,27 @@ function needData(){
     if(sectAct&&(!d.sector||filtSel.sector[d.sector]===false))return;
     if(segSel[d.segment]===false)return;
     if(cut&&!cut.has(d.zp))return;
-    const v=+d.visits||0;byTeam[d.team]=(byTeam[d.team]||0)+v;bySeg[d.segment]=(bySeg[d.segment]||0)+v;totV+=v;
+    const v=+d.visits||0; rawTotV+=v;
     const doc=d.hcp||(d.zp+'#'+rown);
     (segDocs[d.segment]||(segDocs[d.segment]=new Set())).add(doc);
     (teamDocs[d.team]||(teamDocs[d.team]=new Set())).add(doc);
     allDocs.add(doc);
+    if(sumMode){
+      byTeam[d.team]=(byTeam[d.team]||0)+v;bySeg[d.segment]=(bySeg[d.segment]||0)+v;totV+=v;
+    }else{
+      const k=d.team+'|'+doc+'|'+(d.zp||'');
+      const b=best[k];
+      if(!b){best[k]={v:v,seg:d.segment,team:d.team};}
+      else if(v>b.v){b.v=v;b.seg=d.segment;}
+    }
   });
+  if(!sumMode){
+    Object.values(best).forEach(b=>{byTeam[b.team]=(byTeam[b.team]||0)+b.v;bySeg[b.seg]=(bySeg[b.seg]||0)+b.v;totV+=b.v;});
+  }
   const segDocN={};Object.keys(segDocs).forEach(s=>segDocN[s]=segDocs[s].size);
   const teamDocN={};Object.keys(teamDocs).forEach(t=>teamDocN[t]=teamDocs[t].size);
-  return {byTeam,bySeg,segDocN,teamDocN,docTotal:allDocs.size,totV,accKept:cut?cut.size:0,accTot:ac.accTot};
+  const nSelProd=Object.keys(filtSel.product||{}).filter(k=>filtSel.product[k]!==false).length;
+  return {byTeam,bySeg,segDocN,teamDocN,docTotal:allDocs.size,totV,rawV:rawTotV,nSelProd,sumMode,accKept:cut?cut.size:0,accTot:ac.accTot};
 }
 function capacity(){return (+$('c-cd').value)*(+$('c-wd').value);}
 function repsNeeded(v){const cap=capacity(),cyc=+$('c-cy').value||1,u=(+$('c-ut').value)/100;return cap>0&&u>0?(v*cyc)/(cap*u):0;}
@@ -621,11 +645,15 @@ function renderStep2(){
   const required=nd.totV*cyc, usable=cap*util;
   const fsum=k=>{const vals=uniqVals(k);if(!vals.length)return null;const sel=vals.filter(v=>filtSel[k][v]!==false);if(sel.length===vals.length||sel.length===0)return null;return k[0].toUpperCase()+k.slice(1)+': '+(sel.length<=3?sel.join(', '):sel.length+' selected');};
   const filtTxt=[selYear?('Year: '+selYear):null,fsum('product'),fsum('sector')].filter(Boolean).join(' · ')||'All years / products / sectors';
+  const dedupNote=(nd.nSelProd>1&&nd.rawV>nd.totV)
+    ? `<div class="note-line" style="background:#fdf8e8;border:1px solid #e8d9a8"><strong>Shared visits removed.</strong> You selected <strong>${nd.nSelProd} products</strong>. One rep visit can detail several products, so the raw sum of "Call Vist No" across products (<strong>${fmt(nd.rawV,0)}</strong>) counts the same physical visits more than once. The tool keeps the <strong>highest</strong> visit number across the selected products for each doctor at each account within a team, giving <strong>${fmt(nd.totV,0)}</strong> physical visits — a <strong>${fmt((1-nd.totV/nd.rawV)*100,0)}%</strong> reduction. Visits still add up across different accounts and across teams (HA1…P3 vs SC are separate reps).</div>`
+    : '';
   const calcHtml=`<div class="panel"><div class="panel-title">The calculation — how "reps needed" is built</div>
     <div class="panel-sub">Worked through with your live numbers</div>
+    ${dedupNote}
     <div class="note-line" style="font-size:15px;background:var(--sky-bg);border:1px solid var(--sky-bdr)"><strong>${fmt(required,0)}</strong> visits to cover ÷ <strong>${fmt(usable,0)}</strong> usable visits per rep/yr = <strong>${fmt(reps,1)} reps needed</strong>.</div>
     <table>
-      <tr><td>① Target visits in scope = sum of "Call Vist No" for the selected HCPs</td><td class="r">${fmt(nd.totV,0)}</td></tr>
+      <tr><td>① Physical visits in scope = "Call Vist No" for the selected HCPs${(nd.nSelProd>1&&!nd.sumMode)?', shared visits across products removed':(nd.nSelProd>1&&nd.sumMode?', summed across products':'')}</td><td class="r">${fmt(nd.totV,0)}</td></tr>
       <tr><td>② Required visits per year = ① × cycles/yr</td><td class="r">${fmt(nd.totV,0)} × ${cyc} = <strong>${fmt(required,0)}</strong></td></tr>
       <tr><td>③ One rep's capacity = calls/day × days in field</td><td class="r">${$('c-cd').value} × ${$('c-wd').value} = ${fmt(cap,0)} visits/yr</td></tr>
       <tr><td>④ Usable per rep = ③ × utilisation%</td><td class="r">${fmt(cap,0)} × ${$('c-ut').value}% = ${fmt(usable,0)} visits/yr</td></tr>
@@ -790,18 +818,20 @@ function buildPrint(phi){
   <div class="ps-foot">Afford = reps the per-product CCM III target funds. Need = target visits to selected segments + top-% accounts ÷ rep capacity. Sizes affordability &amp; coverage, not productivity. Guidance generic. v8.0</div>`;
 }
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
-function saveJSON(){const out={tool:'Field Force Sizing Planner v8.0',savedAt:new Date().toISOString(),phi:+$('i-phi').value,top:+$('i-top').value,selYear:selYear,filtSel:filtSel,acctMode:acctMode,layerSel:layerSel,cap:{cd:+$('c-cd').value,wd:+$('c-wd').value,cy:+$('c-cy').value,ut:+$('c-ut').value},teams:teams.map(t=>({name:t.name,fte:t.fte,cpf:t.cpf})),lines:lines.map(l=>({product:l.product,teamName:(teams.find(t=>t.id===l.teamId)||{}).name,rev:l.rev,chg:l.chg,target:l.target,stage:l.stage})),segSel};
+function saveJSON(){const out={tool:'Field Force Sizing Planner v8.0',savedAt:new Date().toISOString(),phi:+$('i-phi').value,top:+$('i-top').value,selYear:selYear,filtSel:filtSel,acctMode:acctMode,layerSel:layerSel,prodOverlap:prodOverlap,cap:{cd:+$('c-cd').value,wd:+$('c-wd').value,cy:+$('c-cy').value,ut:+$('c-ut').value},teams:teams.map(t=>({name:t.name,fte:t.fte,cpf:t.cpf})),lines:lines.map(l=>({product:l.product,teamName:(teams.find(t=>t.id===l.teamId)||{}).name,rev:l.rev,chg:l.chg,target:l.target,stage:l.stage})),segSel};
   const tnm=teams.slice(0,3).map(t=>t.name).join('-').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,40)||'team';
   const b=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='FieldForceSizing_'+tnm+'_'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('JSON saved');}
 function loadJSON(e){const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=ev=>{try{const d=JSON.parse(ev.target.result);
   if(d.phi!=null)$('i-phi').value=d.phi;if(d.top!=null)$('i-top').value=d.top;if(d.cap){$('c-cd').value=d.cap.cd;$('c-wd').value=d.cap.wd;$('c-cy').value=d.cap.cy;$('c-ut').value=d.cap.ut;}
   if(d.selYear!=null)selYear=d.selYear;if(d.filtSel)filtSel={product:d.filtSel.product||{},sector:d.filtSel.sector||{}};if(d.acctMode)acctMode=d.acctMode;if(d.layerSel)layerSel=d.layerSel;
+  if(d.prodOverlap){prodOverlap=d.prodOverlap;document.querySelectorAll('input[name=poverlap]').forEach(r=>{r.checked=((r.getAttribute('onchange')||'').includes("'"+prodOverlap+"'"));});}
   teams=[];lines=[];tid=0;lid=0;(d.teams||[]).forEach(t=>teams.push({id:++tid,name:t.name,fte:t.fte,cpf:t.cpf}));
   (d.lines||[]).forEach(l=>{const tm=teams.find(t=>t.name===l.teamName)||teams[0];lines.push({id:++lid,teamId:tm?tm.id:null,product:l.product,rev:l.rev,chg:l.chg,target:l.target,stage:l.stage||'maturation'});});
   if(d.segSel)segSel=d.segSel;renderTeams();renderLines();run();toast('Data loaded');}catch(err){toast('Invalid JSON');}e.target.value='';};rd.readAsText(f);}
 function savePDF(){window.print();}
 function loadDemo(){$('i-phi').value=50;$('i-top').value=80;$('c-cd').value=7;$('c-wd').value=200;$('c-cy').value=1;$('c-ut').value=80;
-  teams=[];lines=[];tid=0;lid=0;accData=null;mapData=null;segSel={};step=1;filtSel={product:{},sector:{}};acctMode='top';layerSel={};selYear='';accDiag=null;mapDiag=null;
+  teams=[];lines=[];tid=0;lid=0;accData=null;mapData=null;segSel={};step=1;filtSel={product:{},sector:{}};acctMode='top';layerSel={};selYear='';accDiag=null;mapDiag=null;prodOverlap='max';
+  document.querySelectorAll('input[name=poverlap]').forEach(r=>{r.checked=((r.getAttribute('onchange')||'').includes("'max'"));});
   $('st-acc').textContent='none';$('st-acc').className='upl-state upl-no';$('st-map').textContent='none';$('st-map').className='upl-state upl-no';
   teams.push({id:++tid,name:'Team 1',fte:10,cpf:0.85});
   lines.push({id:++lid,teamId:tid,product:'Product 1',rev:100,chg:-10,target:40,stage:'maturation'});
